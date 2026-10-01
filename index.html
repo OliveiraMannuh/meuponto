@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Meu Ponto</title>
+  <meta name="description" content="Registro pessoal de ponto: entradas, saídas, atrasos, horas extras, faltas e atestados.">
+  <meta name="theme-color" content="#1f6f5c">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%231f6f5c'/%3E%3Cpath d='M32 16v17l11 7' stroke='white' stroke-width='6' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topo">
+    <div>
+      <div class="marca">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="28"/><path d="M32 16v17l11 7"/></svg>
+        <h1>Meu Ponto</h1>
+      </div>
+      <p class="slogan">Seu horário, sua prova.</p>
+    </div>
+    <div id="usuario" class="usuario" hidden>
+      <span id="usuario-email"></span>
+      <button type="button" id="btn-sair" class="link">Sair</button>
+    </div>
+  </header>
+
+  <!-- LOGIN: única tela visível sem autenticação -->
+  <section id="tela-login" class="tela-login">
+    <div class="cartao login">
+      <svg class="cadeado" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      <h2>Acesso restrito</h2>
+      <p>Entre com a sua conta Google autorizada para registrar e consultar seu ponto.</p>
+      <button type="button" id="btn-login" class="btn btn-login" hidden>Entrar com Google</button>
+      <p id="login-status" class="dica">Verificando acesso…</p>
+      <p id="login-erro" class="login-erro" role="alert" hidden></p>
+    </div>
+    <noscript><p class="login-erro">Ative o JavaScript para usar o Meu Ponto.</p></noscript>
+  </section>
+
+  <div id="app" hidden>
+  <nav class="abas" aria-label="Seções">
+    <button type="button" data-aba="hoje">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span>Hoje</span>
+    </button>
+    <button type="button" data-aba="registros">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+      <span>Registros</span>
+    </button>
+    <button type="button" data-aba="relatorio">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8"/></svg>
+      <span>Relatório</span>
+    </button>
+    <button type="button" data-aba="config">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      <span>Ajustes</span>
+    </button>
+  </nav>
+
+  <main>
+    <!-- HOJE -->
+    <section id="aba-hoje" class="aba">
+      <div id="aviso-config" class="faixa" hidden>
+        Antes de começar, informe seu horário e os dias que você trabalha.
+        <button type="button" class="link" data-ir="config">Configurar agora</button>
+      </div>
+
+      <div class="cartao relogio">
+        <p id="relogio-data" class="relogio-data"></p>
+        <p id="relogio-hora" class="relogio-hora">--:--:--</p>
+        <p id="status-hoje" class="status"></p>
+        <button type="button" id="btn-bater" class="btn-grande">Registrar entrada</button>
+        <p class="dica">O horário é gravado no instante do clique, com segundos, usando o relógio deste aparelho.</p>
+      </div>
+
+      <div class="cartao">
+        <h2>Registros de hoje</h2>
+        <ul id="lista-hoje" class="lista"></ul>
+      </div>
+    </section>
+
+    <!-- REGISTROS -->
+    <section id="aba-registros" class="aba">
+      <div class="cartao" id="cartao-form-registro">
+        <h2 id="titulo-form-registro">Registro manual</h2>
+        <form id="form-registro" novalidate>
+          <fieldset class="grupo-horario">
+            <legend>Entrada</legend>
+            <div class="linha fixa">
+              <label>Data
+                <input type="date" id="reg-entrada-data" required>
+              </label>
+              <label>Hora
+                <input type="time" id="reg-entrada-hora" required>
+              </label>
+            </div>
+          </fieldset>
+          <fieldset class="grupo-horario">
+            <legend>Saída</legend>
+            <div class="linha fixa">
+              <label>Data
+                <input type="date" id="reg-saida-data">
+              </label>
+              <label>Hora
+                <input type="time" id="reg-saida-hora">
+              </label>
+            </div>
+          </fieldset>
+          <label>Observação
+            <input type="text" id="reg-obs" maxlength="200" placeholder="Opcional">
+          </label>
+          <p class="dica">Deixe a saída em branco se ainda estiver trabalhando. Se a data da saída ficar vazia, é usada a mesma data da entrada. Se o dia tiver só um par de entrada e saída com mais de 6h, o intervalo configurado é descontado automaticamente.</p>
+          <div class="acoes">
+            <button type="submit" class="btn">Salvar registro</button>
+            <button type="button" id="btn-cancelar-edicao" class="btn secundario" hidden>Cancelar edição</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="cartao">
+        <h2>Falta, atestado ou folga</h2>
+        <form id="form-ocorrencia" novalidate>
+          <div class="linha">
+            <label>Data
+              <input type="date" id="oc-data" required>
+            </label>
+            <label>Tipo
+              <select id="oc-tipo">
+                <option value="falta">Falta</option>
+                <option value="atestado">Atestado médico</option>
+                <option value="folga">Folga / feriado</option>
+              </select>
+            </label>
+          </div>
+          <label>Observação
+            <input type="text" id="oc-obs" maxlength="200" placeholder="Ex.: CID, nome do médico, motivo">
+          </label>
+          <div class="acoes">
+            <button type="submit" class="btn">Salvar</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="cartao">
+        <div class="cabecalho-cartao">
+          <h2>Histórico</h2>
+          <input type="month" id="hist-mes" aria-label="Mês do histórico">
+        </div>
+        <div id="lista-historico"></div>
+      </div>
+    </section>
+
+    <!-- RELATÓRIO -->
+    <section id="aba-relatorio" class="aba">
+      <div class="cartao">
+        <div class="cabecalho-cartao">
+          <h2 id="titulo-relatorio">Relatório mensal</h2>
+          <input type="month" id="rel-mes" aria-label="Mês do relatório">
+        </div>
+        <p id="rel-jornada" class="dica"></p>
+        <div id="resumo-mes" class="grade-resumo"></div>
+        <div class="acoes nao-imprimir">
+          <button type="button" id="btn-imprimir" class="btn secundario">Imprimir / salvar PDF</button>
+          <button type="button" id="btn-csv" class="btn secundario">Exportar planilha (CSV)</button>
+        </div>
+      </div>
+
+      <div class="cartao">
+        <h2>Dias com atraso</h2>
+        <div id="lista-atrasos"></div>
+      </div>
+
+      <div class="cartao">
+        <h2>Faltas, atestados e folgas</h2>
+        <div id="lista-ocorrencias"></div>
+      </div>
+
+      <div class="cartao">
+        <h2>Dia a dia</h2>
+        <p class="dica dica-rolagem">Deslize a tabela para o lado para ver todas as colunas.</p>
+        <div class="tabela-rolagem">
+          <table id="tabela-mes"></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONFIGURAÇÕES -->
+    <section id="aba-config" class="aba">
+      <div class="cartao">
+        <h2>Meu horário de trabalho</h2>
+        <form id="form-config" novalidate>
+          <div class="linha fixa">
+            <label>Entrada
+              <input type="time" id="cfg-inicio" required>
+            </label>
+            <label>Saída
+              <input type="time" id="cfg-fim" required>
+            </label>
+          </div>
+          <div class="linha">
+            <label>Intervalo (minutos)
+              <input type="number" id="cfg-intervalo" min="0" max="300" step="5" inputmode="numeric">
+            </label>
+            <label>Tolerância de atraso (minutos)
+              <input type="number" id="cfg-tolerancia" min="0" max="120" step="1" inputmode="numeric">
+            </label>
+          </div>
+          <fieldset>
+            <legend>Dias que trabalho</legend>
+            <div id="cfg-dias" class="dias"></div>
+          </fieldset>
+          <p id="cfg-jornada" class="dica"></p>
+          <div class="acoes">
+            <button type="submit" class="btn">Salvar configurações</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="cartao">
+        <h2>Backup dos dados</h2>
+        <p class="dica">Seus dados ficam salvos na nuvem, vinculados à sua conta, e sincronizam entre aparelhos. Mesmo assim, baixe um backup de vez em quando e guarde fora da pasta do projeto.</p>
+        <div class="acoes">
+          <button type="button" id="btn-exportar" class="btn">Baixar backup</button>
+          <label class="btn secundario" for="inp-importar">Restaurar backup</label>
+          <input type="file" id="inp-importar" accept="application/json,.json" hidden>
+          <button type="button" id="btn-apagar" class="btn perigo">Apagar tudo</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  </div>
+
+  <div id="aviso" class="aviso" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+  <script type="module" src="auth.js"></script>
+</body>
+</html>

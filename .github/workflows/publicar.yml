@@ -1,0 +1,50 @@
+# Publica o Meu Ponto no GitHub Pages a cada push na branch main.
+# A configuração do Firebase vem do secret FIREBASE_CONFIG e é gerada só no
+# pacote publicado; ela nunca fica salva no repositório.
+name: Publicar no GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Montar o site com a configuração do Firebase
+        env:
+          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+        run: |
+          if [ -z "$FIREBASE_CONFIG" ]; then
+            echo "::error::Crie o secret FIREBASE_CONFIG em Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          mkdir _site
+          cp index.html style.css app.js auth.js _site/
+          printf 'export const firebaseConfig = %s;\n' "$FIREBASE_CONFIG" > _site/firebase-config.js
+          node --input-type=module -e "
+            const { firebaseConfig: c } = await import('file://$PWD/_site/firebase-config.js');
+            if (!c?.apiKey || !c?.projectId) { console.error('FIREBASE_CONFIG sem apiKey/projectId'); process.exit(1); }
+          "
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

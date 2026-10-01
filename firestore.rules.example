@@ -1,0 +1,23 @@
+// MODELO das regras de segurança do Firestore.
+// Copie para "firestore.rules" (que está no .gitignore), troque o e-mail e cole o
+// conteúdo em: Console do Firebase → Firestore Database → Regras → Publicar.
+//
+// Estas regras rodam nos servidores do Google: são elas que garantem que só o
+// e-mail autorizado lê e grava os dados, mesmo que alguém leia o código do site.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Cada conta só acessa o próprio documento, e só o e-mail autorizado é aceito.
+    match /usuarios/{uid} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email == 'SEU_EMAIL@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    // Todo o resto é bloqueado.
+    match /{documento=**} {
+      allow read, write: if false;
+    }
+  }
+}

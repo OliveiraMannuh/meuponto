@@ -1,0 +1,29 @@
+# ===== Configurações e credenciais (NUNCA publicar) =====
+# Configuração real do Firebase. Na publicação ela vem do secret FIREBASE_CONFIG.
+firebase-config.js
+# Regras reais do Firestore, com o e-mail autorizado. Ficam só no Console do Firebase.
+firestore.rules
+# Variáveis de ambiente e chaves
+.env
+.env.*
+*.pem
+*.key
+# Arquivos locais do Firebase CLI, caso venha a usar
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# ===== Dados pessoais exportados pelo app (horários, faltas, atestados) =====
+meu-ponto-backup-*.json
+meu-ponto-*.csv
+*.json
+*.csv
+*.pdf
+
+# ===== Sistema e editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
