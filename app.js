@@ -8,8 +8,6 @@
 const DIAS_CURTOS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const ORDEM_DIAS = [1, 2, 3, 4, 5, 6, 0];
 const TIPOS = { falta: 'Falta', atestado: 'Atestado médico', folga: 'Folga / feriado' };
-// Com um único par entrada/saída acima disso, o intervalo não foi batido e é descontado.
-const DESCONTO_INTERVALO_APOS = 6 * 60;
 const MAX_REGISTRO = 24 * 60;
 
 /* ============================== Datas ============================== */
@@ -68,7 +66,10 @@ function diasDoMes(mes) {
 
 function estadoPadrao() {
   return {
-    config: { definida: false, inicio: '08:00', fim: '17:00', intervalo: 60, tolerancia: 10, dias: [1, 2, 3, 4, 5] },
+    config: {
+      definida: false, inicio: '08:00', fim: '17:00', almocoInicio: '12:00', almocoFim: '13:15',
+      tolerancia: 10, dias: [1, 2, 3, 4, 5],
+    },
     registros: [],
     ocorrencias: [],
   };
@@ -84,7 +85,10 @@ function normalizar(bruto) {
   const cfg = { ...padrao.config, ...(bruto && typeof bruto.config === 'object' ? bruto.config : {}) };
   if (!RE_HORA.test(cfg.inicio)) cfg.inicio = padrao.config.inicio;
   if (!RE_HORA.test(cfg.fim)) cfg.fim = padrao.config.fim;
-  cfg.intervalo = Math.max(0, Number(cfg.intervalo) || 0);
+  // Vazio = sem almoço. Dados antigos (só com "intervalo" em minutos) recebem o horário padrão.
+  if (cfg.almocoInicio !== '' && !RE_HORA.test(cfg.almocoInicio)) cfg.almocoInicio = padrao.config.almocoInicio;
+  if (cfg.almocoFim !== '' && !RE_HORA.test(cfg.almocoFim)) cfg.almocoFim = padrao.config.almocoFim;
+  delete cfg.intervalo;
   cfg.tolerancia = Math.max(0, Number(cfg.tolerancia) || 0);
   cfg.dias = Array.isArray(cfg.dias) ? cfg.dias.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : padrao.config.dias;
 
@@ -112,10 +116,34 @@ let editandoId = null;
 
 /* ============================== Cálculos ============================== */
 
+const temAlmoco = cfg => RE_HORA.test(cfg.almocoInicio) && RE_HORA.test(cfg.almocoFim) &&
+  minutosDoDia(cfg.almocoFim) > minutosDoDia(cfg.almocoInicio);
+
+const duracaoAlmoco = cfg => (temAlmoco(cfg) ? minutosDoDia(cfg.almocoFim) - minutosDoDia(cfg.almocoInicio) : 0);
+
+// Minutos do período [inicio, fim) que caem dentro do horário de almoço de cada dia que ele toca.
+function minutosNoAlmoco(inicio, fim, cfg = estado.config) {
+  if (!temAlmoco(cfg)) return 0;
+  let total = 0;
+  const dia = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
+  while (dia < fim) {
+    const janelaIni = new Date(dia);
+    janelaIni.setMinutes(minutosDoDia(cfg.almocoInicio));
+    const janelaFim = new Date(dia);
+    janelaFim.setMinutes(minutosDoDia(cfg.almocoFim));
+    total += Math.max(0, Math.min(fim, janelaFim) - Math.max(inicio, janelaIni));
+    dia.setDate(dia.getDate() + 1);
+  }
+  return Math.round(total / 60000);
+}
+
 function jornadaPrevista(cfg = estado.config) {
-  let bruta = minutosDoDia(cfg.fim) - minutosDoDia(cfg.inicio);
-  if (bruta <= 0) bruta += 24 * 60; // turno que vira a noite
-  return Math.max(0, bruta - cfg.intervalo);
+  const inicio = new Date(2000, 0, 3);
+  inicio.setMinutes(minutosDoDia(cfg.inicio));
+  const fim = new Date(2000, 0, 3);
+  fim.setMinutes(minutosDoDia(cfg.fim));
+  if (fim <= inicio) fim.setDate(fim.getDate() + 1); // turno que vira a noite
+  return Math.max(0, Math.round((fim - inicio) / 60000) - minutosNoAlmoco(inicio, fim, cfg));
 }
 
 function registrosDoDia(data) {
@@ -134,10 +162,9 @@ function resumoDia(data, hoje = dataISO(new Date())) {
   const fechados = registros.filter(r => r.saida);
   const emAndamento = registros.some(r => !r.saida);
 
-  let trabalhado = fechados.reduce((soma, r) => soma + diffMin(r.entrada, r.saida), 0);
-  const intervaloDescontado = fechados.length === 1 && !emAndamento &&
-    trabalhado > DESCONTO_INTERVALO_APOS && cfg.intervalo > 0;
-  if (intervaloDescontado) trabalhado -= cfg.intervalo;
+  // Tempo dentro do horário de almoço não conta, tenha ou não sido batido o ponto do almoço.
+  const almoco = fechados.reduce((soma, r) => soma + minutosNoAlmoco(lerDataHora(r.entrada), lerDataHora(r.saida)), 0);
+  const trabalhado = fechados.reduce((soma, r) => soma + diffMin(r.entrada, r.saida), 0) - almoco;
 
   let atraso = 0;
   if (diaUtil && !ocorrencia && registros.length) {
@@ -168,7 +195,7 @@ function resumoDia(data, hoje = dataISO(new Date())) {
   }
 
   const saldo = contaSaldo ? trabalhado - esperado : 0;
-  return { data, diaUtil, registros, ocorrencia, trabalhado, intervaloDescontado, emAndamento, atraso, status, esperado, saldo };
+  return { data, diaUtil, registros, ocorrencia, trabalhado, almoco, emAndamento, atraso, status, esperado, saldo };
 }
 
 function resumoMes(mes) {
@@ -388,17 +415,20 @@ function salvarConfig(evento) {
   evento.preventDefault();
   const inicio = $('#cfg-inicio').value;
   const fim = $('#cfg-fim').value;
-  const intervalo = Number($('#cfg-intervalo').value) || 0;
+  const almocoInicio = $('#cfg-almoco-inicio').value;
+  const almocoFim = $('#cfg-almoco-fim').value;
   const tolerancia = Number($('#cfg-tolerancia').value) || 0;
   const dias = [...document.querySelectorAll('#cfg-dias input:checked')].map(i => Number(i.value));
 
   if (!RE_HORA.test(inicio) || !RE_HORA.test(fim)) { avisar('Informe os horários de entrada e saída.', true); return; }
   if (inicio === fim) { avisar('A entrada e a saída não podem ser iguais.', true); return; }
+  if (Boolean(almocoInicio) !== Boolean(almocoFim)) { avisar('Informe o início e o fim do almoço, ou deixe os dois vazios.', true); return; }
+  if (almocoInicio && almocoFim <= almocoInicio) { avisar('O fim do almoço precisa ser depois do início.', true); return; }
   if (!dias.length) { avisar('Marque pelo menos um dia de trabalho.', true); return; }
-  if (intervalo < 0 || tolerancia < 0) { avisar('Use valores positivos.', true); return; }
+  if (tolerancia < 0) { avisar('Use valores positivos.', true); return; }
 
-  const nova = { definida: true, inicio, fim, intervalo, tolerancia, dias: dias.sort() };
-  if (jornadaPrevista(nova) <= 0) { avisar('O intervalo é maior que a jornada.', true); return; }
+  const nova = { definida: true, inicio, fim, almocoInicio, almocoFim, tolerancia, dias: dias.sort() };
+  if (jornadaPrevista(nova) <= 0) { avisar('O almoço ocupa toda a jornada.', true); return; }
 
   estado.config = nova;
   salvar();
@@ -470,7 +500,7 @@ function apagarTudo() {
 function exportarCSV() {
   const mes = $('#rel-mes').value;
   const { dias } = resumoMes(mes);
-  const linhas = [['Data', 'Dia', 'Entrada', 'Saída', 'Trabalhado', 'Atraso', 'Saldo', 'Situação', 'Observação']];
+  const linhas = [['Data', 'Dia', 'Entrada', 'Saída', 'Almoço descontado', 'Trabalhado', 'Atraso', 'Saldo', 'Situação', 'Observação']];
   for (const d of dias) {
     const obs = [d.ocorrencia?.obs, ...d.registros.map(r => r.obs)].filter(Boolean).join(' | ');
     linhas.push([
@@ -478,6 +508,7 @@ function exportarCSV() {
       DIAS_CURTOS[lerData(d.data).getDay()],
       d.registros.map(r => horaDe(r.entrada)).join(' / '),
       d.registros.map(r => (r.saida ? horaDe(r.saida) : '')).join(' / '),
+      d.almoco ? fmtDuracao(d.almoco) : '',
       d.registros.length ? fmtDuracao(d.trabalhado) : '',
       d.atraso ? fmtDuracao(d.atraso) : '',
       d.saldo ? fmtDuracao(d.saldo, true) : '',
@@ -589,7 +620,8 @@ function renderizarHoje() {
   if (aberto && aberto.entrada.slice(0, 10) !== hoje) {
     status = `Há uma entrada em aberto desde <strong>${fmtDataHora(aberto.entrada)}</strong>.`;
   } else if (aberto) {
-    status = `Trabalhando desde <strong>${horaDe(aberto.entrada)}</strong> · ${fmtDuracao(Math.max(0, diffMin(aberto.entrada, dataHoraLocal(agora))))}`;
+    const decorrido = diffMin(aberto.entrada, dataHoraLocal(agora)) - minutosNoAlmoco(lerDataHora(aberto.entrada), agora);
+    status = `Trabalhando desde <strong>${horaDe(aberto.entrada)}</strong> · ${fmtDuracao(Math.max(0, decorrido))}`;
   } else if (dia.ocorrencia) {
     status = `Hoje está marcado como <strong>${TIPOS[dia.ocorrencia.tipo]}</strong>.`;
   } else if (dia.registros.length) {
@@ -619,7 +651,7 @@ function renderizarHistorico() {
 
   $('#lista-historico').innerHTML = dias.length ? dias.map(d => {
     const semana = DIAS_CURTOS[lerData(d.data).getDay()];
-    const total = d.registros.length ? `${fmtDuracao(d.trabalhado)}${d.intervaloDescontado ? ' (−intervalo)' : ''}` : '';
+    const total = d.registros.length ? `${fmtDuracao(d.trabalhado)}${d.almoco ? ` (−${fmtDuracao(d.almoco)} almoço)` : ''}` : '';
     const atraso = d.atraso ? ` <span class="selo atraso">atraso ${fmtDuracao(d.atraso)}</span>` : '';
     return `
       <div class="grupo-dia">
@@ -644,7 +676,9 @@ function renderizarRelatorio() {
   $('#titulo-relatorio').textContent = `Relatório — ${nomeMes(mes)}`;
   const diasTxt = ORDEM_DIAS.filter(d => cfg.dias.includes(d)).map(d => DIAS_CURTOS[d]).join(', ');
   $('#rel-jornada').textContent =
-    `Horário: ${cfg.inicio} às ${cfg.fim} · intervalo ${cfg.intervalo} min · tolerância ${cfg.tolerancia} min · ${diasTxt}`;
+    `Horário: ${cfg.inicio} às ${cfg.fim} · ` +
+    `${temAlmoco(cfg) ? `almoço ${cfg.almocoInicio} às ${cfg.almocoFim}` : 'sem almoço'} · ` +
+    `jornada ${fmtDuracao(jornadaPrevista(cfg))} · tolerância ${cfg.tolerancia} min · ${diasTxt}`;
 
   const classeSaldo = r.saldo > 0 ? 'positivo' : r.saldo < 0 ? 'negativo' : '';
   $('#resumo-mes').innerHTML = [
@@ -708,7 +742,8 @@ function renderizarConfig() {
   const cfg = estado.config;
   $('#cfg-inicio').value = cfg.inicio;
   $('#cfg-fim').value = cfg.fim;
-  $('#cfg-intervalo').value = cfg.intervalo;
+  $('#cfg-almoco-inicio').value = cfg.almocoInicio;
+  $('#cfg-almoco-fim').value = cfg.almocoFim;
   $('#cfg-tolerancia').value = cfg.tolerancia;
   $('#cfg-dias').innerHTML = ORDEM_DIAS.map(d => `
     <label><input type="checkbox" value="${d}" ${cfg.dias.includes(d) ? 'checked' : ''}>${DIAS_CURTOS[d]}</label>`).join('');
@@ -723,8 +758,11 @@ function atualizarPreviaJornada() {
     $('#cfg-jornada').textContent = '';
     return;
   }
-  const diaria = jornadaPrevista({ inicio, fim, intervalo: Number($('#cfg-intervalo').value) || 0 });
-  $('#cfg-jornada').textContent = `Jornada diária: ${fmtDuracao(diaria)} · semanal: ${fmtDuracao(diaria * dias)} (${dias} dia(s)).`;
+  const cfg = { inicio, fim, almocoInicio: $('#cfg-almoco-inicio').value, almocoFim: $('#cfg-almoco-fim').value };
+  const diaria = jornadaPrevista(cfg);
+  const almoco = duracaoAlmoco(cfg) ? ` (já descontado ${fmtDuracao(duracaoAlmoco(cfg))} de almoço)` : '';
+  $('#cfg-jornada').textContent =
+    `Jornada diária: ${fmtDuracao(diaria)}${almoco} · semanal: ${fmtDuracao(diaria * dias)} (${dias} dia(s)).`;
 }
 
 function renderizarTudo() {

@@ -109,7 +109,7 @@
           <label>Observação
             <input type="text" id="reg-obs" maxlength="200" placeholder="Opcional">
           </label>
-          <p class="dica">Deixe a saída em branco se ainda estiver trabalhando. Se a data da saída ficar vazia, é usada a mesma data da entrada. Se o dia tiver só um par de entrada e saída com mais de 6h, o intervalo configurado é descontado automaticamente.</p>
+          <p class="dica">Deixe a saída em branco se ainda estiver trabalhando. Se a data da saída ficar vazia, é usada a mesma data da entrada. O tempo dentro do horário de almoço (em Ajustes) é descontado automaticamente.</p>
           <div class="acoes">
             <button type="submit" class="btn">Salvar registro</button>
             <button type="button" id="btn-cancelar-edicao" class="btn secundario" hidden>Cancelar edição</button>
@@ -197,14 +197,21 @@
               <input type="time" id="cfg-fim" required>
             </label>
           </div>
-          <div class="linha">
-            <label>Intervalo (minutos)
-              <input type="number" id="cfg-intervalo" min="0" max="300" step="5" inputmode="numeric">
-            </label>
-            <label>Tolerância de atraso (minutos)
-              <input type="number" id="cfg-tolerancia" min="0" max="120" step="1" inputmode="numeric">
-            </label>
-          </div>
+          <fieldset class="grupo-horario">
+            <legend>Horário de almoço</legend>
+            <div class="linha fixa">
+              <label>Início
+                <input type="time" id="cfg-almoco-inicio">
+              </label>
+              <label>Fim
+                <input type="time" id="cfg-almoco-fim">
+              </label>
+            </div>
+            <p class="dica">O tempo registrado dentro desse horário não conta como trabalhado. Deixe os dois campos vazios se não houver almoço.</p>
+          </fieldset>
+          <label>Tolerância de atraso (minutos)
+            <input type="number" id="cfg-tolerancia" min="0" max="120" step="1" inputmode="numeric">
+          </label>
           <fieldset>
             <legend>Dias que trabalho</legend>
             <div id="cfg-dias" class="dias"></div>
