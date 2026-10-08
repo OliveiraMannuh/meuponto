@@ -67,8 +67,8 @@ function diasDoMes(mes) {
 function estadoPadrao() {
   return {
     config: {
-      definida: false, inicio: '08:00', fim: '17:00', almocoInicio: '12:00', almocoFim: '13:15',
-      tolerancia: 10, dias: [1, 2, 3, 4, 5],
+      definida: false, inicio: '08:00', fim: '17:00', almocoInicio: '12:00', almocoFim: '13:00',
+      intervaloMinimo: 60, tolerancia: 10, dias: [1, 2, 3, 4, 5],
     },
     registros: [],
     ocorrencias: [],
@@ -89,6 +89,8 @@ function normalizar(bruto) {
   if (cfg.almocoInicio !== '' && !RE_HORA.test(cfg.almocoInicio)) cfg.almocoInicio = padrao.config.almocoInicio;
   if (cfg.almocoFim !== '' && !RE_HORA.test(cfg.almocoFim)) cfg.almocoFim = padrao.config.almocoFim;
   delete cfg.intervalo;
+  const minimo = Number(cfg.intervaloMinimo);
+  cfg.intervaloMinimo = Number.isFinite(minimo) && minimo >= 0 ? minimo : padrao.config.intervaloMinimo;
   cfg.tolerancia = Math.max(0, Number(cfg.tolerancia) || 0);
   cfg.dias = Array.isArray(cfg.dias) ? cfg.dias.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : padrao.config.dias;
 
@@ -162,9 +164,25 @@ function resumoDia(data, hoje = dataISO(new Date())) {
   const fechados = registros.filter(r => r.saida);
   const emAndamento = registros.some(r => !r.saida);
 
-  // Tempo dentro do horário de almoço não conta, tenha ou não sido batido o ponto do almoço.
-  const almoco = fechados.reduce((soma, r) => soma + minutosNoAlmoco(lerDataHora(r.entrada), lerDataHora(r.saida)), 0);
+  // Almoço batido = pausa entre dois registros do dia que toca o horário de almoço.
+  // Nesse caso vale o intervalo real; senão, desconta-se o horário de almoço configurado.
+  const pausas = [];
+  for (let i = 1; i < registros.length; i++) {
+    const anterior = registros[i - 1];
+    if (anterior.saida && anterior.saida < registros[i].entrada) pausas.push({ inicio: anterior.saida, fim: registros[i].entrada });
+  }
+  const pausasAlmoco = pausas.filter(p => minutosNoAlmoco(lerDataHora(p.inicio), lerDataHora(p.fim)) > 0);
+  const almocoBatido = pausasAlmoco.length > 0;
+  const intervalo = almocoBatido ? pausasAlmoco.reduce((soma, p) => soma + diffMin(p.inicio, p.fim), 0) : null;
+
+  const almoco = almocoBatido ? 0
+    : fechados.reduce((soma, r) => soma + minutosNoAlmoco(lerDataHora(r.entrada), lerDataHora(r.saida)), 0);
   const trabalhado = fechados.reduce((soma, r) => soma + diffMin(r.entrada, r.saida), 0) - almoco;
+
+  // CLT art. 71: o mínimo depende da jornada. Dia em andamento é avaliado pela jornada prevista.
+  const jornadaDoDia = emAndamento ? Math.max(trabalhado, diaUtil ? jornadaPrevista() : 0) : trabalhado;
+  const minimoIntervalo = intervaloMinimoCLT(jornadaDoDia, cfg);
+  const intervaloFaltante = almocoBatido ? Math.max(0, minimoIntervalo - intervalo) : 0;
 
   let atraso = 0;
   if (diaUtil && !ocorrencia && registros.length) {
@@ -195,14 +213,29 @@ function resumoDia(data, hoje = dataISO(new Date())) {
   }
 
   const saldo = contaSaldo ? trabalhado - esperado : 0;
-  return { data, diaUtil, registros, ocorrencia, trabalhado, almoco, emAndamento, atraso, status, esperado, saldo };
+  return {
+    data, diaUtil, registros, ocorrencia, trabalhado, almoco, emAndamento, atraso, status, esperado, saldo,
+    almocoBatido, pausasAlmoco, intervalo, minimoIntervalo, intervaloFaltante,
+  };
+}
+
+// Intervalo mínimo pela CLT (art. 71): acima de 6h, o configurado (1h, ou até 30 min por acordo
+// coletivo); de 4h a 6h, 15 min; até 4h, nenhum.
+function intervaloMinimoCLT(minutosTrabalhados, cfg = estado.config) {
+  if (minutosTrabalhados > 6 * 60) return cfg.intervaloMinimo;
+  if (minutosTrabalhados > 4 * 60) return 15;
+  return 0;
 }
 
 function resumoMes(mes) {
   const hoje = dataISO(new Date());
   const dias = diasDoMes(mes).map(d => resumoDia(d, hoje));
-  const r = { dias, trabalhado: 0, saldo: 0, diasTrabalhados: 0, minutosAtraso: 0, atrasos: [], faltas: [], atestados: [], folgas: [], semRegistro: [] };
+  const r = {
+    dias, trabalhado: 0, saldo: 0, diasTrabalhados: 0, minutosAtraso: 0, atrasos: [], faltas: [], atestados: [], folgas: [],
+    semRegistro: [], almocosCurtos: [], minutosSuprimidos: 0,
+  };
   for (const d of dias) {
+    if (d.intervaloFaltante) { r.almocosCurtos.push(d); r.minutosSuprimidos += d.intervaloFaltante; }
     r.trabalhado += d.trabalhado;
     r.saldo += d.saldo;
     if (d.registros.length) r.diasTrabalhados++;
@@ -213,6 +246,17 @@ function resumoMes(mes) {
     if (d.status === 'sem-registro') r.semRegistro.push(d);
   }
   return r;
+}
+
+// Almoço do dia: intervalo real quando batido; senão, quanto foi descontado pelo horário fixo.
+function textoAlmoco(d) {
+  if (d.almocoBatido) return fmtDuracao(d.intervalo);
+  return d.almoco ? `${fmtDuracao(d.almoco)} (fixo)` : '';
+}
+
+function situacao(d) {
+  const alertas = [d.atraso && 'Atraso', d.intervaloFaltante && 'Almoço curto'].filter(Boolean);
+  return alertas.length ? alertas.join(' · ') : ROTULO_STATUS[d.status];
 }
 
 const ROTULO_STATUS = {
@@ -418,6 +462,7 @@ function salvarConfig(evento) {
   const almocoInicio = $('#cfg-almoco-inicio').value;
   const almocoFim = $('#cfg-almoco-fim').value;
   const tolerancia = Number($('#cfg-tolerancia').value) || 0;
+  const intervaloMinimo = Number($('#cfg-intervalo-minimo').value) || 0;
   const dias = [...document.querySelectorAll('#cfg-dias input:checked')].map(i => Number(i.value));
 
   if (!RE_HORA.test(inicio) || !RE_HORA.test(fim)) { avisar('Informe os horários de entrada e saída.', true); return; }
@@ -425,9 +470,9 @@ function salvarConfig(evento) {
   if (Boolean(almocoInicio) !== Boolean(almocoFim)) { avisar('Informe o início e o fim do almoço, ou deixe os dois vazios.', true); return; }
   if (almocoInicio && almocoFim <= almocoInicio) { avisar('O fim do almoço precisa ser depois do início.', true); return; }
   if (!dias.length) { avisar('Marque pelo menos um dia de trabalho.', true); return; }
-  if (tolerancia < 0) { avisar('Use valores positivos.', true); return; }
+  if (tolerancia < 0 || intervaloMinimo < 0) { avisar('Use valores positivos.', true); return; }
 
-  const nova = { definida: true, inicio, fim, almocoInicio, almocoFim, tolerancia, dias: dias.sort() };
+  const nova = { definida: true, inicio, fim, almocoInicio, almocoFim, intervaloMinimo, tolerancia, dias: dias.sort() };
   if (jornadaPrevista(nova) <= 0) { avisar('O almoço ocupa toda a jornada.', true); return; }
 
   estado.config = nova;
@@ -500,7 +545,7 @@ function apagarTudo() {
 function exportarCSV() {
   const mes = $('#rel-mes').value;
   const { dias } = resumoMes(mes);
-  const linhas = [['Data', 'Dia', 'Entrada', 'Saída', 'Almoço descontado', 'Trabalhado', 'Atraso', 'Saldo', 'Situação', 'Observação']];
+  const linhas = [['Data', 'Dia', 'Entrada', 'Saída', 'Almoço', 'Almoço abaixo do mínimo', 'Trabalhado', 'Atraso', 'Saldo', 'Situação', 'Observação']];
   for (const d of dias) {
     const obs = [d.ocorrencia?.obs, ...d.registros.map(r => r.obs)].filter(Boolean).join(' | ');
     linhas.push([
@@ -508,11 +553,12 @@ function exportarCSV() {
       DIAS_CURTOS[lerData(d.data).getDay()],
       d.registros.map(r => horaDe(r.entrada)).join(' / '),
       d.registros.map(r => (r.saida ? horaDe(r.saida) : '')).join(' / '),
-      d.almoco ? fmtDuracao(d.almoco) : '',
+      textoAlmoco(d),
+      d.intervaloFaltante ? fmtDuracao(d.intervaloFaltante) : '',
       d.registros.length ? fmtDuracao(d.trabalhado) : '',
       d.atraso ? fmtDuracao(d.atraso) : '',
       d.saldo ? fmtDuracao(d.saldo, true) : '',
-      d.atraso ? 'Atraso' : ROTULO_STATUS[d.status],
+      situacao(d),
       obs,
     ]);
   }
@@ -620,7 +666,8 @@ function renderizarHoje() {
   if (aberto && aberto.entrada.slice(0, 10) !== hoje) {
     status = `Há uma entrada em aberto desde <strong>${fmtDataHora(aberto.entrada)}</strong>.`;
   } else if (aberto) {
-    const decorrido = diffMin(aberto.entrada, dataHoraLocal(agora)) - minutosNoAlmoco(lerDataHora(aberto.entrada), agora);
+    const almocoAgora = dia.almocoBatido ? 0 : minutosNoAlmoco(lerDataHora(aberto.entrada), agora);
+    const decorrido = diffMin(aberto.entrada, dataHoraLocal(agora)) - almocoAgora;
     status = `Trabalhando desde <strong>${horaDe(aberto.entrada)}</strong> · ${fmtDuracao(Math.max(0, decorrido))}`;
   } else if (dia.ocorrencia) {
     status = `Hoje está marcado como <strong>${TIPOS[dia.ocorrencia.tipo]}</strong>.`;
@@ -633,6 +680,11 @@ function renderizarHoje() {
     status = 'Hoje não é dia de trabalho.';
   }
   if (dia.atraso) status += `<br><span class="txt-alerta">Atraso de ${fmtDuracao(dia.atraso)} na entrada.</span>`;
+  if (dia.almocoBatido) {
+    status += dia.intervaloFaltante
+      ? `<br><span class="txt-alerta">Almoço de ${fmtDuracao(dia.intervalo)}: ${fmtDuracao(dia.intervaloFaltante)} abaixo do mínimo de ${fmtDuracao(dia.minimoIntervalo)}.</span>`
+      : `<br>Almoço de ${fmtDuracao(dia.intervalo)}.`;
+  }
   $('#status-hoje').innerHTML = status;
 
   const lista = [...dia.registros];
@@ -652,7 +704,8 @@ function renderizarHistorico() {
   $('#lista-historico').innerHTML = dias.length ? dias.map(d => {
     const semana = DIAS_CURTOS[lerData(d.data).getDay()];
     const total = d.registros.length ? `${fmtDuracao(d.trabalhado)}${d.almoco ? ` (−${fmtDuracao(d.almoco)} almoço)` : ''}` : '';
-    const atraso = d.atraso ? ` <span class="selo atraso">atraso ${fmtDuracao(d.atraso)}</span>` : '';
+    const atraso = (d.atraso ? ` <span class="selo atraso">atraso ${fmtDuracao(d.atraso)}</span>` : '') +
+      (d.intervaloFaltante ? ` <span class="selo atraso">almoço ${fmtDuracao(d.intervalo)}</span>` : '');
     return `
       <div class="grupo-dia">
         <h3>${semana}, ${fmtData(d.data)}${atraso}<span>${total}</span></h3>
@@ -688,7 +741,27 @@ function renderizarRelatorio() {
     indicador('Faltas', r.faltas.length, '', r.faltas.length ? 'negativo' : ''),
     indicador('Atestados', r.atestados.length),
     indicador('Sem registro', r.semRegistro.length, 'dias úteis passados', r.semRegistro.length ? 'alerta' : ''),
+    indicador('Almoço curto', r.almocosCurtos.length,
+      r.almocosCurtos.length ? `faltaram ${fmtDuracao(r.minutosSuprimidos)}` : 'abaixo do mínimo', r.almocosCurtos.length ? 'alerta' : ''),
   ].join('');
+
+  $('#lista-almocos').innerHTML = r.almocosCurtos.length ? `
+    <table class="tabela-simples">
+      <thead><tr><th>Data</th><th>Saída</th><th>Volta</th><th>Intervalo</th><th>Faltou</th></tr></thead>
+      <tbody>${r.almocosCurtos.map(d => `
+        <tr>
+          <td>${DIAS_CURTOS[lerData(d.data).getDay()]}, ${fmtData(d.data)}</td>
+          <td>${d.pausasAlmoco.map(p => horaDe(p.inicio)).join(' / ')}</td>
+          <td>${d.pausasAlmoco.map(p => horaDe(p.fim)).join(' / ')}</td>
+          <td>${fmtDuracao(d.intervalo)}</td>
+          <td class="num-neg">${fmtDuracao(d.intervaloFaltante)}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr><td colspan="4">Total suprimido no mês</td><td class="num-neg">${fmtDuracao(r.minutosSuprimidos)}</td></tr></tfoot>
+    </table>
+    <p class="dica">Pela CLT (art. 71, §4º), o intervalo não concedido deve ser pago com acréscimo de 50% sobre o tempo suprimido. Só são avaliados os dias em que a saída e a volta do almoço foram registradas.</p>`
+    : `<p class="vazio">Nenhum almoço abaixo do mínimo neste mês.</p>
+       <p class="dica">Só são avaliados os dias em que a saída e a volta do almoço foram registradas.</p>`;
 
   $('#lista-atrasos').innerHTML = r.atrasos.length ? `
     <table class="tabela-simples">
@@ -718,9 +791,9 @@ function renderizarRelatorio() {
 
   const numero = min => (min ? `<span class="${min > 0 ? 'num-pos' : 'num-neg'}">${fmtDuracao(min, true)}</span>` : '');
   $('#tabela-mes').innerHTML = `
-    <thead><tr><th>Data</th><th>Entrada</th><th>Saída</th><th>Trabalhado</th><th>Atraso</th><th>Saldo</th><th>Situação</th></tr></thead>
+    <thead><tr><th>Data</th><th>Entrada</th><th>Saída</th><th>Almoço</th><th>Trabalhado</th><th>Atraso</th><th>Saldo</th><th>Situação</th></tr></thead>
     <tbody>${r.dias.map(d => {
-      const classe = d.atraso ? 'atraso' : d.status;
+      const classe = d.atraso || d.intervaloFaltante ? 'atraso' : d.status;
       const entradas = d.registros.map(x => horaDe(x.entrada)).join(' / ');
       const saidas = d.registros.map(x => (x.saida ? horaDe(x.saida) : '…')).join(' / ');
       return `
@@ -728,14 +801,15 @@ function renderizarRelatorio() {
           <td>${fmtData(d.data).slice(0, 5)} <small>${DIAS_CURTOS[lerData(d.data).getDay()]}</small></td>
           <td>${entradas}</td>
           <td>${saidas}</td>
+          <td${d.intervaloFaltante ? ' class="num-neg"' : ''}>${textoAlmoco(d)}</td>
           <td>${d.registros.length ? fmtDuracao(d.trabalhado) : ''}</td>
           <td>${d.atraso ? fmtDuracao(d.atraso) : ''}</td>
           <td>${numero(d.saldo)}</td>
-          <td>${d.atraso ? 'Atraso' : ROTULO_STATUS[d.status]}</td>
+          <td>${situacao(d)}</td>
         </tr>`;
     }).join('')}
     </tbody>
-    <tfoot><tr><td colspan="3">Total</td><td>${fmtDuracao(r.trabalhado)}</td><td>${r.minutosAtraso ? fmtDuracao(r.minutosAtraso) : ''}</td><td>${numero(r.saldo)}</td><td></td></tr></tfoot>`;
+    <tfoot><tr><td colspan="4">Total</td><td>${fmtDuracao(r.trabalhado)}</td><td>${r.minutosAtraso ? fmtDuracao(r.minutosAtraso) : ''}</td><td>${numero(r.saldo)}</td><td></td></tr></tfoot>`;
 }
 
 function renderizarConfig() {
@@ -744,6 +818,7 @@ function renderizarConfig() {
   $('#cfg-fim').value = cfg.fim;
   $('#cfg-almoco-inicio').value = cfg.almocoInicio;
   $('#cfg-almoco-fim').value = cfg.almocoFim;
+  $('#cfg-intervalo-minimo').value = cfg.intervaloMinimo;
   $('#cfg-tolerancia').value = cfg.tolerancia;
   $('#cfg-dias').innerHTML = ORDEM_DIAS.map(d => `
     <label><input type="checkbox" value="${d}" ${cfg.dias.includes(d) ? 'checked' : ''}>${DIAS_CURTOS[d]}</label>`).join('');

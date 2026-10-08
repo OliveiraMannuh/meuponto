@@ -171,6 +171,11 @@
       </div>
 
       <div class="cartao">
+        <h2>Almoço abaixo do mínimo</h2>
+        <div id="lista-almocos"></div>
+      </div>
+
+      <div class="cartao">
         <h2>Faltas, atestados e folgas</h2>
         <div id="lista-ocorrencias"></div>
       </div>
@@ -207,11 +212,17 @@
                 <input type="time" id="cfg-almoco-fim">
               </label>
             </div>
-            <p class="dica">O tempo registrado dentro desse horário não conta como trabalhado. Deixe os dois campos vazios se não houver almoço.</p>
+            <p class="dica">Se você bater o ponto na saída e na volta do almoço, vale o intervalo real. Se não bater, o tempo dentro desse horário é descontado. Deixe os dois campos vazios se não houver almoço.</p>
           </fieldset>
-          <label>Tolerância de atraso (minutos)
-            <input type="number" id="cfg-tolerancia" min="0" max="120" step="1" inputmode="numeric">
-          </label>
+          <div class="linha">
+            <label>Intervalo mínimo (minutos)
+              <input type="number" id="cfg-intervalo-minimo" min="0" max="120" step="5" inputmode="numeric">
+            </label>
+            <label>Tolerância de atraso (minutos)
+              <input type="number" id="cfg-tolerancia" min="0" max="120" step="1" inputmode="numeric">
+            </label>
+          </div>
+          <p class="dica">Pela CLT (art. 71), jornadas acima de 6h exigem no mínimo 1h de intervalo; acordo ou convenção coletiva pode reduzir para 30 min. Dias com almoço batido abaixo do mínimo aparecem no relatório.</p>
           <fieldset>
             <legend>Dias que trabalho</legend>
             <div id="cfg-dias" class="dias"></div>

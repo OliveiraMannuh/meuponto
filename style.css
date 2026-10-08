@@ -388,7 +388,7 @@ details p { margin: 4px 0 0; }
 
 .tabela-rolagem { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
 .dica-rolagem { display: none; margin-bottom: 8px; }
-#tabela-mes { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+#tabela-mes { width: 100%; min-width: 640px; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
 #tabela-mes th, #tabela-mes td { padding: 7px 6px; border-bottom: 1px solid var(--borda); text-align: left; white-space: nowrap; }
 #tabela-mes th { color: var(--suave); font-weight: 600; font-size: .78rem; position: sticky; top: 0; background: var(--superficie); }
 /* Coluna da data fica fixa ao deslizar a tabela para o lado. */
